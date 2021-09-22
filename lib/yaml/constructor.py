@@ -18,6 +18,12 @@ class ConstructorError(MarkedYAMLError):
 
 class BaseConstructor:
 
+    inf_value = 1e300
+    while inf_value != inf_value*inf_value:
+        inf_value *= inf_value
+    nan_value = -inf_value/inf_value   # Trying to make a quiet NaN (like C99).
+
+
     yaml_constructors = {}
     yaml_multi_constructors = {}
 
@@ -168,6 +174,94 @@ class BaseConstructor:
             cls.yaml_multi_constructors = cls.yaml_multi_constructors.copy()
         cls.yaml_multi_constructors[tag_prefix] = multi_constructor
 
+    def construct_yaml_null(self, node):
+        self.construct_scalar(node)
+        return None
+
+    bool_values = {
+        'yes':      True,
+        'no':       False,
+        'true':     True,
+        'false':    False,
+        'on':       True,
+        'off':      False,
+    }
+
+    def construct_yaml_bool(self, node):
+        value = self.construct_scalar(node)
+        return self.bool_values[value.lower()]
+
+    def construct_yaml_str(self, node):
+        return self.construct_scalar(node)
+
+    def construct_yaml_seq(self, node):
+        data = []
+        yield data
+        data.extend(self.construct_sequence(node))
+
+    def construct_yaml_map(self, node):
+        data = {}
+        yield data
+        value = self.construct_mapping(node)
+        data.update(value)
+
+    def construct_undefined(self, node):
+        raise ConstructorError(None, None,
+                "could not determine a constructor for the tag %r" % node.tag,
+                node.start_mark)
+
+    def construct_yaml_int(self, node):
+        value = self.construct_scalar(node)
+        value = value.replace('_', '')
+        sign = +1
+        if value[0] == '-':
+            sign = -1
+        if value[0] in '+-':
+            value = value[1:]
+        if value == '0':
+            return 0
+        elif value.startswith('0b'):
+            return sign*int(value[2:], 2)
+        elif value.startswith('0x'):
+            return sign*int(value[2:], 16)
+        elif value[0] == '0':
+            return sign*int(value, 8)
+        elif ':' in value:
+            digits = [int(part) for part in value.split(':')]
+            digits.reverse()
+            base = 1
+            value = 0
+            for digit in digits:
+                value += digit*base
+                base *= 60
+            return sign*value
+        else:
+            return sign*int(value)
+
+    def construct_yaml_float(self, node):
+        value = self.construct_scalar(node)
+        value = value.replace('_', '').lower()
+        sign = +1
+        if value[0] == '-':
+            sign = -1
+        if value[0] in '+-':
+            value = value[1:]
+        if value == '.inf':
+            return sign*self.inf_value
+        elif value == '.nan':
+            return self.nan_value
+        elif ':' in value:
+            digits = [float(part) for part in value.split(':')]
+            digits.reverse()
+            base = 1
+            value = 0.0
+            for digit in digits:
+                value += digit*base
+                base *= 60
+            return sign*value
+        else:
+            return sign*float(value)
+
 class SafeConstructor(BaseConstructor):
 
     def construct_scalar(self, node):
@@ -216,80 +310,6 @@ class SafeConstructor(BaseConstructor):
         if isinstance(node, MappingNode):
             self.flatten_mapping(node)
         return super().construct_mapping(node, deep=deep)
-
-    def construct_yaml_null(self, node):
-        self.construct_scalar(node)
-        return None
-
-    bool_values = {
-        'yes':      True,
-        'no':       False,
-        'true':     True,
-        'false':    False,
-        'on':       True,
-        'off':      False,
-    }
-
-    def construct_yaml_bool(self, node):
-        value = self.construct_scalar(node)
-        return self.bool_values[value.lower()]
-
-    def construct_yaml_int(self, node):
-        value = self.construct_scalar(node)
-        value = value.replace('_', '')
-        sign = +1
-        if value[0] == '-':
-            sign = -1
-        if value[0] in '+-':
-            value = value[1:]
-        if value == '0':
-            return 0
-        elif value.startswith('0b'):
-            return sign*int(value[2:], 2)
-        elif value.startswith('0x'):
-            return sign*int(value[2:], 16)
-        elif value[0] == '0':
-            return sign*int(value, 8)
-        elif ':' in value:
-            digits = [int(part) for part in value.split(':')]
-            digits.reverse()
-            base = 1
-            value = 0
-            for digit in digits:
-                value += digit*base
-                base *= 60
-            return sign*value
-        else:
-            return sign*int(value)
-
-    inf_value = 1e300
-    while inf_value != inf_value*inf_value:
-        inf_value *= inf_value
-    nan_value = -inf_value/inf_value   # Trying to make a quiet NaN (like C99).
-
-    def construct_yaml_float(self, node):
-        value = self.construct_scalar(node)
-        value = value.replace('_', '').lower()
-        sign = +1
-        if value[0] == '-':
-            sign = -1
-        if value[0] in '+-':
-            value = value[1:]
-        if value == '.inf':
-            return sign*self.inf_value
-        elif value == '.nan':
-            return self.nan_value
-        elif ':' in value:
-            digits = [float(part) for part in value.split(':')]
-            digits.reverse()
-            base = 1
-            value = 0.0
-            for digit in digits:
-                value += digit*base
-                base *= 60
-            return sign*value
-        else:
-            return sign*float(value)
 
     def construct_yaml_binary(self, node):
         try:
@@ -399,20 +419,6 @@ class SafeConstructor(BaseConstructor):
         value = self.construct_mapping(node)
         data.update(value)
 
-    def construct_yaml_str(self, node):
-        return self.construct_scalar(node)
-
-    def construct_yaml_seq(self, node):
-        data = []
-        yield data
-        data.extend(self.construct_sequence(node))
-
-    def construct_yaml_map(self, node):
-        data = {}
-        yield data
-        value = self.construct_mapping(node)
-        data.update(value)
-
     def construct_yaml_object(self, node, cls):
         data = cls.__new__(cls)
         yield data
@@ -422,11 +428,6 @@ class SafeConstructor(BaseConstructor):
         else:
             state = self.construct_mapping(node)
             data.__dict__.update(state)
-
-    def construct_undefined(self, node):
-        raise ConstructorError(None, None,
-                "could not determine a constructor for the tag %r" % node.tag,
-                node.start_mark)
 
 SafeConstructor.add_constructor(
         'tag:yaml.org,2002:null',
