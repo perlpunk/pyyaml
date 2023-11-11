@@ -6,6 +6,7 @@ from .serializer import *
 from .representer import *
 from .resolver import *
 
+foo
 class BaseDumper(Emitter, Serializer, BaseRepresenter, BaseResolver):
 
     def __init__(self, stream,
