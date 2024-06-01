@@ -212,10 +212,77 @@ class SafeConstructor(BaseConstructor):
         if merge:
             node.value = merge + node.value
 
+    def extract_merge(self, node, deep=False):
+        merge = []
+        index = 0
+        while index < len(node.value):
+            key_node, value_node = node.value[index]
+            if key_node.tag == 'tag:yaml.org,2002:merge':
+                del node.value[index]
+                print("============================== extract_merge <<:")
+                print(value_node)
+                constructed_val = self.construct_object(value_node, deep=True)
+                print(constructed_val)
+                if isinstance(constructed_val, collections.abc.Mapping):
+                    merge.append(constructed_val)
+                elif isinstance(constructed_val, collections.abc.Sequence):
+                    submerge = []
+                    for subnode in constructed_val:
+                        if not isinstance(subnode, collections.abc.Mapping):
+                            raise ConstructorError("while constructing a mapping",
+                                    node.start_mark,
+                                    "expected a mapping for merging, but found %s"
+                                    % subnode.id, subnode.start_mark)
+                        submerge.append(subnode)
+                    print("==============!!!!!!!!!!!!!!!!!!!!!!!!!!!! submerge:")
+                    print(submerge)
+                    for value in submerge:
+                        merge.append(value)
+                else:
+                    raise ConstructorError("while constructing a mapping", node.start_mark,
+                            "expected a mapping or list of mappings for merging, but found %s"
+                            % value_node.id, value_node.start_mark)
+            elif key_node.tag == 'tag:yaml.org,2002:value':
+                key_node.tag = 'tag:yaml.org,2002:str'
+                index += 1
+            else:
+                index += 1
+        if merge:
+            print("============ extract_merge")
+            print(merge)
+            constructed = {}
+            for item in merge:
+                print("====== item ====")
+                print(item)
+                for key_node, value_node in item.items():
+                    if not isinstance(key_node, collections.abc.Hashable):
+                        raise ConstructorError("while constructing a mapping", node.start_mark,
+                                "found unhashable key", key_node.start_mark)
+                    if key_node not in constructed:
+                        constructed[key_node] = value_node
+            return constructed
+        return []
+
     def construct_mapping(self, node, deep=False):
-        if isinstance(node, MappingNode):
-            self.flatten_mapping(node)
-        return super().construct_mapping(node, deep=deep)
+        if 0:
+            if isinstance(node, MappingNode):
+                self.flatten_mapping(node)
+            return super().construct_mapping(node, deep=deep)
+        else:
+            if isinstance(node, MappingNode):
+                mergevalues = self.extract_merge(node, deep=deep)
+            mapping = super().construct_mapping(node, deep=deep)
+            if mergevalues:
+                print("=========== construct_mapping before merge:")
+                print(mapping)
+                print("=========== construct_mapping to merge:")
+                print(mergevalues)
+                for key in mergevalues:
+                    if key not in mapping:
+                        mapping[key] = mergevalues[key]
+                print("=========== construct_mapping after merge:")
+                print(mapping)
+            return mapping
 
     def construct_yaml_null(self, node):
         self.construct_scalar(node)
